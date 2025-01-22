@@ -6,6 +6,7 @@
    [squint.jsx-test]
    [squint.html-test]
    [squint.string-test]
+   [squint.nrepl-test]
    [squint.test-utils :refer [eq js! jss! jsv!]]
    ["fs" :as fs]
    ["child_process" :as process]
@@ -2353,4 +2354,4 @@ new Foo();")
   (is (eq [1 2 3] (jsv! "(def f #(apply vector %&)) (f 1 2 3)"))))
 
 (defn init []
-  (t/run-tests 'squint.compiler-test 'squint.jsx-test 'squint.string-test 'squint.html-test))
+  (t/run-tests 'squint.compiler-test 'squint.jsx-test 'squint.string-test 'squint.html-test 'squint.nrepl-test))

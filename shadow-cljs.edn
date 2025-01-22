@@ -22,9 +22,12 @@
                      compileString squint.compiler.node/compile-string-js}}
     :cljs.pprint {:entries [cljs.pprint]
                   :depends-on #{:compiler}}
-    :node.nrepl_server {:depends-on #{:compiler.node :cljs.pprint :node}
+    :node.nrepl_server {:entries [squint.repl.nrepl-server]
+                        :depends-on #{:compiler.node :cljs.pprint :node}
                         :exports {startServer squint.repl.nrepl-server/start-server}}
     :cli {:depends-on #{:compiler :compiler.node :node}
-          :init-fn squint.internal.cli/init}}
+          :init-fn squint.internal.cli/init}
+    :squint_tests {:entries [squint.nrepl-test]
+                   :depends-on #{:node.nrepl_server :cljs.pprint}}}
    :build-hooks [(shadow.cljs.build-report/hook
                   {:output-to "report.html"})]}}}

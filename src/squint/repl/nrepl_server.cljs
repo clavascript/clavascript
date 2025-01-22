@@ -6,7 +6,8 @@
    ["net" :as node-net]
    [squint.compiler-common :as cc :refer [*cljs-ns*]]
    [squint.compiler :as compiler]
-   [squint.repl.nrepl.bencode :refer [decode-all encode]]))
+   [squint.repl.nrepl.bencode :refer [decode-all encode]]
+   [edamame.core :as e]))
 
 (defn debug [& strs]
   (.debug js/console (str/join " " strs)))
@@ -97,39 +98,63 @@
 (def in-progress (atom false))
 (def state (atom nil))
 
-(defn compile [the-val]
+(defn read-forms [code]
+  (let [rdr (e/reader code)]
+    (loop [forms []]
+      (let [form (try
+                   (e/parse-next rdr compiler/squint-parse-opts)
+                   (catch :default e
+                     (if (str/includes? (ex-message e) "EOF while reading")
+                       ::eof
+                       (throw e))))]
+        (if (or (= form ::eof)
+                (= form :edamame.core/eof))
+          forms
+          (recur (conj forms form)))))))
+
+(defn compile-form [form]
   (let [{js-str :javascript
          cljs-ns :ns
-         :as new-state} (compiler/compile-string* the-val {:context :return
-                                                           :elide-exports true
-                                                           :repl true
-                                                           :async true}
-                                                  @state)
-        _ (reset! state new-state)
-        js-str (str/replace "(async function () {\n%s\n}) ()" "%s" js-str)]
+         :as new-state} (compiler/compile-string*
+                         (binding [*print-meta* true]
+                           (pr-str form))
+                         {:context :return
+                          :elide-exports true
+                          :repl true
+                          :async true}
+                         @state)]
+    (reset! state new-state)
     (reset! last-ns cljs-ns)
-    js-str))
+    (str/replace "(async function () {\n%s\n}) ()" "%s" js-str)))
 
-(defn do-handle-eval [{:keys [ns code file
-                              _load-file? _line] :as request} send-fn]
-  (->
-   (js/Promise.resolve code)
-   (.then compile)
-   (.then (fn [v]
-            (println "About to eval:")
-            (println v)
-            (js/eval v)))
-   (.then (fn [val]
-            (send-fn request {"ns" (str @last-ns)
-                              "value" (format-value (:nrepl.middleware.print/print request)
-                                                    (:nrepl.middleware.print/options request)
-                                                    val)})))
-   (.catch (fn [e]
-             (js/console.error e)
-             (handle-error send-fn request e)))
-   (.finally (fn []
-               (send-fn request {"ns" (str @last-ns)
-                                 "status" ["done"]})))))
+(defn eval-form [form send-fn request]
+  (-> (js/Promise.resolve form)
+      (.then compile-form)
+      (.then (fn [js-code]
+               (println "Evaluating:" js-code)
+               (js/eval js-code)))
+      (.then (fn [val]
+               (send-fn request
+                        {"ns" (str @last-ns)
+                         "value" (format-value
+                                  (:nrepl.middleware.print/print request)
+                                  (:nrepl.middleware.print/options request)
+                                  val)})
+               val))
+      (.catch (fn [e]
+                (js/console.error e)
+                (handle-error send-fn request e)))))
+
+(defn do-handle-eval [{:keys [code] :as request} send-fn]
+  (let [forms (read-forms code)]
+    (-> (reduce (fn [promise form]
+                  (.then promise #(eval-form form send-fn request)))
+                (js/Promise.resolve nil)
+                forms)
+        (.finally (fn []
+                    (send-fn request
+                             {"ns" (str @last-ns)
+                              "status" ["done"]}))))))
 
 (defn handle-eval [{:keys [ns] :as request} send-fn]
   (prn :ns ns)
